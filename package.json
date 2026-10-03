@@ -4,9 +4,8 @@
   "private": true,
   "description": "Minimalistic, mobile-first PWA for shared trip expense splitting",
   "scripts": {
-    "postinstall": "npm install --prefix server && npm install --prefix client",
     "dev": "concurrently \"npm run dev --prefix server\" \"npm run dev --prefix client\"",
-    "build": "npm run build --prefix client",
+    "build": "npm install --no-audit --no-fund --prefix server && npm install --no-audit --no-fund --prefix client && npm run build --prefix client",
     "start": "npm run start --prefix server",
     "db:init": "npm run db:init --prefix server",
     "seed": "npm run seed --prefix server",
