@@ -77,23 +77,12 @@ npm run dev
 
 ---
 
-## 📦 Production Build & Cloud Deployment
+## 🚀 One-Click Render Blueprint Deployment
 
-Build the frontend client:
-```bash
-npm run build
-```
+This repository includes a pre-configured `render.yaml` Blueprint file.
 
-Start the unified server in production:
-```bash
-npm run start
-```
-
-Express will serve API routes under `/api/*` and static React PWA assets from `/client/dist/*` with SPA fallback routing.
-
-### Deploying to Render / Railway
-1. Push repository to GitHub.
-2. Create a Web Service on Render or Railway.
-3. Set Build Command: `npm install && npm run build`
-4. Set Start Command: `npm run start`
-5. Configure Environment Variables (`DATABASE_URL`, `JWT_SECRET`, `PORT`).
+1. Go to your [Render Dashboard](https://dashboard.render.com).
+2. Click **New +** -> **Blueprint**.
+3. Connect your GitHub repository (`https://github.com/Jatin-gorana/Tripsplit.git`).
+4. Enter your Neon PostgreSQL connection string when prompted for `DATABASE_URL`.
+5. Render will automatically generate a secure `JWT_SECRET`, build the app (`npm run build`), and deploy the service!
