@@ -45,6 +45,16 @@ async function queryWithRetry(text, params, maxRetries = 2) {
   }
 }
 
+// Auto-migration helper to ensure required columns exist on existing databases
+async function ensureMigrations() {
+  try {
+    await pool.query('ALTER TABLE expenses ADD COLUMN IF NOT EXISTS is_all_members BOOLEAN DEFAULT TRUE;');
+  } catch (err) {
+    console.warn('Migration check:', err.message);
+  }
+}
+ensureMigrations();
+
 module.exports = {
   pool,
   query: (text, params) => queryWithRetry(text, params)

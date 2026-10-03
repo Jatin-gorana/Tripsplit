@@ -82,10 +82,17 @@ router.post('/', async (req, res) => {
       return res.status(400).json({ error: 'Payer is not a valid member of this trip.' });
     }
 
+    // Fetch all current trip members
+    const allMembers = await query('SELECT id FROM members WHERE trip_id = $1', [req.trip.id]);
+    const allMemberIds = allMembers.rows.map(m => Number(m.id));
+
+    let is_all_members = false;
     // Default to ALL trip members if split_member_ids is empty or not provided
     if (!split_member_ids || split_member_ids.length === 0) {
-      const allMembers = await query('SELECT id FROM members WHERE trip_id = $1', [req.trip.id]);
-      split_member_ids = allMembers.rows.map(m => Number(m.id));
+      split_member_ids = allMemberIds;
+      is_all_members = true;
+    } else if (split_member_ids.length === allMemberIds.length && split_member_ids.every(id => allMemberIds.includes(Number(id)))) {
+      is_all_members = true;
     }
 
     // Verify all split_member_ids belong to this trip
@@ -105,10 +112,10 @@ router.post('/', async (req, res) => {
       await client.query('BEGIN');
 
       const expRes = await client.query(
-        `INSERT INTO expenses (trip_id, description, amount_paise, category, expense_date, paid_by_member_id, created_by_user_id)
-         VALUES ($1, $2, $3, $4, $5, $6, $7)
+        `INSERT INTO expenses (trip_id, description, amount_paise, category, expense_date, paid_by_member_id, created_by_user_id, is_all_members)
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
          RETURNING *`,
-        [req.trip.id, description, amount_paise, category, expense_date, paid_by_member_id, req.user.id]
+        [req.trip.id, description, amount_paise, category, expense_date, paid_by_member_id, req.user.id, is_all_members]
       );
       const newExpense = expRes.rows[0];
 
@@ -165,10 +172,17 @@ router.put('/:expenseId', async (req, res) => {
 
     let { description, amount_paise, category, expense_date, paid_by_member_id, split_member_ids } = parseResult.data;
 
+    // Fetch all current trip members
+    const allMembers = await query('SELECT id FROM members WHERE trip_id = $1', [req.trip.id]);
+    const allMemberIds = allMembers.rows.map(m => Number(m.id));
+
+    let is_all_members = false;
     // Default to ALL trip members if split_member_ids is empty or not provided
     if (!split_member_ids || split_member_ids.length === 0) {
-      const allMembers = await query('SELECT id FROM members WHERE trip_id = $1', [req.trip.id]);
-      split_member_ids = allMembers.rows.map(m => Number(m.id));
+      split_member_ids = allMemberIds;
+      is_all_members = true;
+    } else if (split_member_ids.length === allMemberIds.length && split_member_ids.every(id => allMemberIds.includes(Number(id)))) {
+      is_all_members = true;
     }
 
     const splits = calculateSplits(amount_paise, split_member_ids);
@@ -183,10 +197,11 @@ router.put('/:expenseId', async (req, res) => {
              amount_paise = $2,
              category = $3,
              expense_date = $4,
-             paid_by_member_id = $5
-         WHERE id = $6
+             paid_by_member_id = $5,
+             is_all_members = $6
+         WHERE id = $7
          RETURNING *`,
-        [description, amount_paise, category, expense_date, paid_by_member_id, expenseId]
+        [description, amount_paise, category, expense_date, paid_by_member_id, is_all_members, expenseId]
       );
 
       // Remove old splits and write new ones

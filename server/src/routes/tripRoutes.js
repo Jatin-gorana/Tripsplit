@@ -5,6 +5,7 @@ const { query, pool } = require('../db');
 const { authenticateToken } = require('../middleware/auth');
 const { authorizeTripMember, authorizeAdminOnly } = require('../middleware/authorization');
 const { calculateDashboard, calculateSettlements } = require('../utils/settle');
+const { resplitTripExpenses } = require('../utils/resplitHelper');
 
 const router = express.Router();
 
@@ -163,7 +164,7 @@ router.get('/invite/:code', async (req, res) => {
   }
 });
 
-// POST /api/trips/join - Join trip via invite code
+// POST /api/trips/join - Join trip via invite code + Auto Resplit
 router.post('/join', async (req, res) => {
   try {
     const parseResult = joinTripSchema.safeParse(req.body);
@@ -192,47 +193,62 @@ router.post('/join', async (req, res) => {
       return res.json({ message: 'Already a member of this trip.', trip, member: existing.rows[0] });
     }
 
+    const client = await pool.connect();
     let joinedMember;
 
-    if (action === 'claim') {
-      if (!member_id) {
-        return res.status(400).json({ error: 'member_id is required to claim a guest profile.' });
+    try {
+      await client.query('BEGIN');
+
+      if (action === 'claim') {
+        if (!member_id) {
+          return res.status(400).json({ error: 'member_id is required to claim a guest profile.' });
+        }
+
+        // Claim an unlinked guest member
+        const guestRes = await client.query(
+          'SELECT * FROM members WHERE id = $1 AND trip_id = $2 AND user_id IS NULL',
+          [member_id, trip.id]
+        );
+
+        if (guestRes.rows.length === 0) {
+          return res.status(400).json({ error: 'Target guest member is invalid or already claimed.' });
+        }
+
+        const updateRes = await client.query(
+          `UPDATE members
+           SET user_id = $1
+           WHERE id = $2
+           RETURNING *`,
+          [req.user.id, member_id]
+        );
+        joinedMember = updateRes.rows[0];
+      } else {
+        // Create new member profile
+        const insertRes = await client.query(
+          `INSERT INTO members (trip_id, name, user_id)
+           VALUES ($1, $2, $3)
+           RETURNING *`,
+          [trip.id, req.user.name, req.user.id]
+        );
+        joinedMember = insertRes.rows[0];
       }
 
-      // Claim an unlinked guest member
-      const guestRes = await query(
-        'SELECT * FROM members WHERE id = $1 AND trip_id = $2 AND user_id IS NULL',
-        [member_id, trip.id]
-      );
+      // Auto-resplit all past trip expenses across the updated member list
+      await resplitTripExpenses(client, trip.id);
 
-      if (guestRes.rows.length === 0) {
-        return res.status(400).json({ error: 'Target guest member is invalid or already claimed.' });
-      }
+      await client.query('COMMIT');
 
-      const updateRes = await query(
-        `UPDATE members
-         SET user_id = $1
-         WHERE id = $2
-         RETURNING *`,
-        [req.user.id, member_id]
-      );
-      joinedMember = updateRes.rows[0];
-    } else {
-      // Create new member profile
-      const insertRes = await query(
-        `INSERT INTO members (trip_id, name, user_id)
-         VALUES ($1, $2, $3)
-         RETURNING *`,
-        [trip.id, req.user.name, req.user.id]
-      );
-      joinedMember = insertRes.rows[0];
+      res.status(201).json({
+        message: 'Successfully joined trip!',
+        trip,
+        member: joinedMember
+      });
+    } catch (err) {
+      await client.query('ROLLBACK');
+      throw err;
+    } finally {
+      client.release();
     }
-
-    res.status(201).json({
-      message: 'Successfully joined trip!',
-      trip,
-      member: joinedMember
-    });
   } catch (err) {
     console.error('Join trip error:', err);
     res.status(500).json({ error: 'Failed to join trip.' });
@@ -296,6 +312,27 @@ router.delete('/:id', authorizeTripMember, authorizeAdminOnly, async (req, res) 
   } catch (err) {
     console.error('Delete trip error:', err);
     res.status(500).json({ error: 'Failed to delete trip.' });
+  }
+});
+
+// POST /api/trips/:id/resplit - Manual 1-click expense rebalancing across all current members
+router.post('/:id/resplit', authorizeTripMember, async (req, res) => {
+  try {
+    const client = await pool.connect();
+    try {
+      await client.query('BEGIN');
+      await resplitTripExpenses(client, req.trip.id);
+      await client.query('COMMIT');
+      res.json({ message: 'All trip expenses successfully re-balanced across current members.' });
+    } catch (err) {
+      await client.query('ROLLBACK');
+      throw err;
+    } finally {
+      client.release();
+    }
+  } catch (err) {
+    console.error('Manual resplit error:', err);
+    res.status(500).json({ error: 'Failed to re-split trip expenses.' });
   }
 });
 
@@ -378,6 +415,30 @@ router.get('/:id/settle', authorizeTripMember, async (req, res) => {
   } catch (err) {
     console.error('Settle-up calculation error:', err);
     res.status(500).json({ error: 'Failed to calculate settlements.' });
+  }
+});
+
+// POST /api/trips/:id/resplit - Manual re-split of trip expenses (Admin only)
+router.post('/:id/resplit', authorizeTripMember, authorizeAdminOnly, async (req, res) => {
+  try {
+    const forceAll = req.body.force_all === true || req.query.force_all === 'true';
+
+    const client = await pool.connect();
+    try {
+      await client.query('BEGIN');
+      await resplitTripExpenses(client, req.trip.id, forceAll);
+      await client.query('COMMIT');
+    } catch (err) {
+      await client.query('ROLLBACK');
+      throw err;
+    } finally {
+      client.release();
+    }
+
+    res.json({ message: 'Expenses successfully recalculated across trip members.' });
+  } catch (err) {
+    console.error('Manual resplit error:', err);
+    res.status(500).json({ error: 'Failed to recalculate trip expenses.' });
   }
 });
 

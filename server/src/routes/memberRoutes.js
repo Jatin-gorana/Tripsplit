@@ -1,8 +1,9 @@
 const express = require('express');
 const { z } = require('zod');
-const { query } = require('../db');
+const { query, pool } = require('../db');
 const { authenticateToken } = require('../middleware/auth');
 const { authorizeTripMember, authorizeAdminOnly } = require('../middleware/authorization');
+const { resplitTripExpenses } = require('../utils/resplitHelper');
 
 const router = express.Router({ mergeParams: true });
 
@@ -37,7 +38,7 @@ router.get('/', async (req, res) => {
   }
 });
 
-// POST /api/trips/:id/members - Add guest member (Admin only)
+// POST /api/trips/:id/members - Add guest member (Admin only) + Auto Resplit
 router.post('/', authorizeAdminOnly, async (req, res) => {
   try {
     const parseResult = addMemberSchema.safeParse(req.body);
@@ -50,14 +51,30 @@ router.post('/', authorizeAdminOnly, async (req, res) => {
 
     const { name } = parseResult.data;
 
-    const result = await query(
-      `INSERT INTO members (trip_id, name, user_id)
-       VALUES ($1, $2, NULL)
-       RETURNING *`,
-      [req.trip.id, name]
-    );
+    const client = await pool.connect();
+    try {
+      await client.query('BEGIN');
 
-    res.status(201).json(result.rows[0]);
+      const result = await client.query(
+        `INSERT INTO members (trip_id, name, user_id)
+         VALUES ($1, $2, NULL)
+         RETURNING *`,
+        [req.trip.id, name]
+      );
+      const newMember = result.rows[0];
+
+      // Auto-resplit all past trip expenses across the updated list of members
+      await resplitTripExpenses(client, req.trip.id);
+
+      await client.query('COMMIT');
+
+      res.status(201).json(newMember);
+    } catch (err) {
+      await client.query('ROLLBACK');
+      throw err;
+    } finally {
+      client.release();
+    }
   } catch (err) {
     console.error('Add member error:', err);
     res.status(500).json({ error: 'Failed to add member.' });
@@ -105,7 +122,7 @@ router.put('/:memberId', async (req, res) => {
   }
 });
 
-// DELETE /api/trips/:id/members/:memberId - Remove member (Admin only)
+// DELETE /api/trips/:id/members/:memberId - Remove member (Admin only) + Auto Resplit remaining
 router.delete('/:memberId', authorizeAdminOnly, async (req, res) => {
   try {
     const memberId = Number(req.params.memberId);
@@ -123,7 +140,7 @@ router.delete('/:memberId', authorizeAdminOnly, async (req, res) => {
       return res.status(400).json({ error: 'Cannot remove the trip admin.' });
     }
 
-    // Check if member has associated expenses (either paid by them or included in splits)
+    // Check if member has associated expenses
     const expenseCheck = await query(
       `SELECT COUNT(*)::int AS cnt
        FROM expenses
@@ -142,9 +159,24 @@ router.delete('/:memberId', authorizeAdminOnly, async (req, res) => {
       });
     }
 
-    await query('DELETE FROM members WHERE id = $1', [memberId]);
+    const client = await pool.connect();
+    try {
+      await client.query('BEGIN');
 
-    res.json({ message: 'Member removed successfully.' });
+      await client.query('DELETE FROM members WHERE id = $1', [memberId]);
+
+      // Resplit remaining expenses across remaining members
+      await resplitTripExpenses(client, req.trip.id);
+
+      await client.query('COMMIT');
+
+      res.json({ message: 'Member removed successfully.' });
+    } catch (err) {
+      await client.query('ROLLBACK');
+      throw err;
+    } finally {
+      client.release();
+    }
   } catch (err) {
     console.error('Remove member error:', err);
     res.status(500).json({ error: 'Failed to remove member.' });

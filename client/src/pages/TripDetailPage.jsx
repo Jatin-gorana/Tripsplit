@@ -14,7 +14,7 @@ import LoadingSkeleton from '../components/LoadingSkeleton';
 
 import {
   ArrowLeft, Copy, Share2, Plus, Settings, Users, Receipt, LayoutDashboard,
-  ArrowRightLeft, AlertCircle, Trash2, Edit3, Shield, User, Wallet, Check
+  ArrowRightLeft, AlertCircle, Trash2, Edit3, Shield, User, Wallet, Check, RefreshCw, Sparkles
 } from 'lucide-react';
 
 const CATEGORY_COLORS = {
@@ -38,6 +38,7 @@ export default function TripDetailPage() {
   const [loading, setLoading] = useState(true);
   const [toast, setToast] = useState(null);
   const [copied, setCopied] = useState(false);
+  const [resplitting, setResplitting] = useState(false);
 
   // Modals state
   const [isExpenseModalOpen, setIsExpenseModalOpen] = useState(false);
@@ -81,6 +82,20 @@ export default function TripDetailPage() {
     setTimeout(() => setCopied(false), 3000);
   };
 
+  const handleResplitAll = async () => {
+    if (isOffline) return;
+    setResplitting(true);
+    try {
+      await apiRequest(`/trips/${id}/resplit`, { method: 'POST' });
+      setToast({ type: 'success', message: 'All trip expenses re-balanced across current members!' });
+      fetchData();
+    } catch (err) {
+      setToast({ type: 'error', message: err.message || 'Re-balance failed.' });
+    } finally {
+      setResplitting(false);
+    }
+  };
+
   // Expense Handlers
   const handleSaveExpense = async (expensePayload) => {
     if (expenseToEdit) {
@@ -117,7 +132,7 @@ export default function TripDetailPage() {
       method: 'POST',
       body: JSON.stringify({ name })
     });
-    setToast({ type: 'success', message: `Added guest member "${name}".` });
+    setToast({ type: 'success', message: `Added guest "${name}" and re-balanced expenses!` });
     fetchData();
   };
 
@@ -134,7 +149,7 @@ export default function TripDetailPage() {
     await apiRequest(`/trips/${id}/members/${memberId}${force ? '?force=true' : ''}`, {
       method: 'DELETE'
     });
-    setToast({ type: 'success', message: 'Member removed.' });
+    setToast({ type: 'success', message: 'Member removed and expenses re-balanced.' });
     fetchData();
   };
 
@@ -295,9 +310,20 @@ export default function TripDetailPage() {
 
             {/* Ranked Member Balances */}
             <div className="bg-white dark:bg-slate-800 p-5 rounded-2xl border border-slate-200 dark:border-slate-700 shadow-sm space-y-4">
-              <h3 className="font-bold text-sm text-slate-700 dark:text-slate-300">
-                Member Balances & Shares
-              </h3>
+              <div className="flex items-center justify-between">
+                <h3 className="font-bold text-sm text-slate-700 dark:text-slate-300">
+                  Member Balances & Shares
+                </h3>
+                <button
+                  onClick={handleResplitAll}
+                  disabled={resplitting || isOffline}
+                  className="flex items-center space-x-1 text-xs text-sky-600 dark:text-sky-400 hover:underline font-medium"
+                  title="Re-balance all expenses across current members"
+                >
+                  <RefreshCw className={`w-3.5 h-3.5 ${resplitting ? 'animate-spin' : ''}`} />
+                  <span>Re-balance All</span>
+                </button>
+              </div>
 
               <div className="space-y-3">
                 {members.map(m => {
@@ -481,19 +507,30 @@ export default function TripDetailPage() {
           <div className="space-y-4">
             <div className="flex items-center justify-between">
               <h2 className="font-bold text-base">Trip Members ({members.length})</h2>
-              {is_admin && (
+              <div className="flex items-center space-x-2">
                 <button
-                  onClick={() => {
-                    setMemberToEdit(null);
-                    setIsMemberModalOpen(true);
-                  }}
-                  disabled={isOffline}
-                  className="flex items-center space-x-1 px-3 py-1.5 bg-sky-500 hover:bg-sky-600 disabled:opacity-50 text-white rounded-xl text-xs font-semibold shadow"
+                  onClick={handleResplitAll}
+                  disabled={resplitting || isOffline}
+                  className="flex items-center space-x-1 px-3 py-1.5 bg-slate-200 dark:bg-slate-700 hover:bg-slate-300 dark:hover:bg-slate-600 text-slate-700 dark:text-slate-200 rounded-xl text-xs font-semibold transition"
+                  title="Re-balance all trip expenses"
                 >
-                  <Plus className="w-4 h-4" />
-                  <span>Add Guest</span>
+                  <RefreshCw className={`w-3.5 h-3.5 ${resplitting ? 'animate-spin' : ''}`} />
+                  <span>Re-balance</span>
                 </button>
-              )}
+                {is_admin && (
+                  <button
+                    onClick={() => {
+                      setMemberToEdit(null);
+                      setIsMemberModalOpen(true);
+                    }}
+                    disabled={isOffline}
+                    className="flex items-center space-x-1 px-3 py-1.5 bg-sky-500 hover:bg-sky-600 disabled:opacity-50 text-white rounded-xl text-xs font-semibold shadow"
+                  >
+                    <Plus className="w-4 h-4" />
+                    <span>Add Guest</span>
+                  </button>
+                )}
+              </div>
             </div>
 
             <div className="space-y-2.5">

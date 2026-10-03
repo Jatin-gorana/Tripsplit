@@ -91,4 +91,22 @@ describe('TripSplit Math & Settlement Core Logic', () => {
     assert.strictEqual(charlieTransfer.to_member_id, 1);
     assert.strictEqual(charlieTransfer.amount_paise, 10000);
   });
+
+  test('recalculating splits when 3rd member joins distributes 2-person expense equally among all 3', () => {
+    // Initial state: ₹1,000 paid by Member 1 for 2 members
+    const initialSplits = calculateSplits(100000, [1, 2]); // ₹500.00 each
+    assert.strictEqual(initialSplits.length, 2);
+    assert.strictEqual(initialSplits[0].share_paise, 50000);
+    assert.strictEqual(initialSplits[1].share_paise, 50000);
+
+    // 3rd member joins -> re-calculate split among 3 members: Member 1, Member 2, Member 3
+    const updatedSplits = calculateSplits(100000, [1, 2, 3]);
+    assert.strictEqual(updatedSplits.length, 3);
+    assert.strictEqual(updatedSplits[0].share_paise, 33334);
+    assert.strictEqual(updatedSplits[1].share_paise, 33333);
+    assert.strictEqual(updatedSplits[2].share_paise, 33333);
+
+    const totalResplit = updatedSplits.reduce((sum, s) => sum + s.share_paise, 0);
+    assert.strictEqual(totalResplit, 100000);
+  });
 });

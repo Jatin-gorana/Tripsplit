@@ -47,6 +47,7 @@ CREATE TABLE expenses (
   expense_date DATE NOT NULL,
   paid_by_member_id INTEGER NOT NULL REFERENCES members(id) ON DELETE CASCADE,
   created_by_user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  is_all_members BOOLEAN DEFAULT TRUE,
   created_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP
 );
 
